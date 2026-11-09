@@ -1,0 +1,22 @@
+[project]
+name = "claude-history-dashboard"
+version = "0.1.0"
+description = "Local dashboard for your Claude Code history: KPIs, tokens, cost, live sessions, and a durable SQLite backup that survives Claude Code's session cleanup."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+authors = [{ name = "Juan Pablo Díaz", email = "juan@juanipis.xyz" }]
+keywords = ["claude", "claude-code", "dashboard", "mcp", "analytics"]
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn>=0.32",
+    "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+mcp = ["mcp>=1.0"]
+
+[project.urls]
+Homepage = "https://github.com/Juanipis/claude-code-history-dashboard"
+Repository = "https://github.com/Juanipis/claude-code-history-dashboard"
+Issues = "https://github.com/Juanipis/claude-code-history-dashboard/issues"

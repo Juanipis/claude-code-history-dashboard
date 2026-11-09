@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Claude History Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <style>
+    body { background:#0b0e14; color:#e6e9ef; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    .card { background:#121723; border:1px solid #1f2735; border-radius:14px; }
+    .kpi-num { font-variant-numeric: tabular-nums; }
+    ::-webkit-scrollbar{width:10px;height:10px} ::-webkit-scrollbar-thumb{background:#283042;border-radius:6px}
+    .tab-active { background:#2563eb; color:white; }
+    .pill { background:#1b2333; border:1px solid #2a3446; }
+    .scroll { scrollbar-width: thin; }
+    .msg-user { border-left:3px solid #2563eb; }
+    .msg-assistant { border-left:3px solid #16a34a; }
+    .msg-meta { opacity:.55; }
+    pre.txt { white-space:pre-wrap; word-break:break-word; font-family: ui-monospace, monospace; font-size:12.5px; }
+    .dot-busy { background:#22c55e; box-shadow:0 0 0 0 rgba(34,197,94,.7); animation:pulse 1.6s infinite; }
+    .dot-idle { background:#f59e0b; }
+    @keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(34,197,94,.6)} 70%{box-shadow:0 0 0 8px rgba(34,197,94,0)} 100%{box-shadow:0 0 0 0 rgba(34,197,94,0)} }
+    .purged { border-style:dashed; opacity:.85; }
+    .spin { animation:spin 1s linear infinite; } @keyframes spin{to{transform:rotate(360deg)}}
+  </style>
+</head>
+<body class="min-h-screen">
+  <header class="sticky top-0 z-30 backdrop-blur bg-[#0b0e14]/85 border-b border-[#1f2735]">
+    <div class="max-w-7xl mx-auto px-5 py-3 flex items-center gap-4">
+      <div class="flex items-center gap-2">
+        <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 grid place-items-center font-bold">C</div>
+        <div>
+          <h1 class="font-semibold leading-tight">Claude History Dashboard</h1>
+          <p class="text-xs text-slate-400" id="root-path">—</p>
+        </div>
+      </div>
+      <nav class="ml-6 flex gap-1 text-sm" id="tabs">
+        <button data-tab="overview" class="tab px-3 py-1.5 rounded-lg tab-active">Resumen</button>
+        <button data-tab="projects" class="tab px-3 py-1.5 rounded-lg hover:bg-[#1b2333]">Proyectos</button>
+        <button data-tab="timeline" class="tab px-3 py-1.5 rounded-lg hover:bg-[#1b2333]">Línea de tiempo</button>
+        <button data-tab="sessions" class="tab px-3 py-1.5 rounded-lg hover:bg-[#1b2333]">Sesiones</button>
+        <button data-tab="mcp" class="tab px-3 py-1.5 rounded-lg hover:bg-[#1b2333]">MCP &amp; Servicio</button>
+      </nav>
+      <div class="ml-auto flex items-center gap-3 text-xs text-slate-400">
+        <span id="live-indicator" class="flex items-center gap-1.5"></span>
+        <span id="loaded-at"></span>
+        <button id="reload" class="pill px-3 py-1.5 rounded-lg hover:bg-[#222c3e]">↻ Sync</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto px-5 py-6">
+
+    <!-- RESUMEN -->
+    <section id="view-overview" class="view">
+      <div id="honesty-note" class="card p-4 mb-5 text-sm text-slate-300 border-amber-700/40"></div>
+      <div id="kpis" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-6"></div>
+      <div class="grid lg:grid-cols-3 gap-4">
+        <div class="card p-4 lg:col-span-2">
+          <h3 class="text-sm font-medium text-slate-300 mb-3">Actividad y tokens por día</h3>
+          <canvas id="chart-daily" height="120"></canvas>
+        </div>
+        <div class="card p-4">
+          <h3 class="text-sm font-medium text-slate-300 mb-3">Tokens por proyecto</h3>
+          <canvas id="chart-proj" height="220"></canvas>
+        </div>
+        <div class="card p-4">
+          <h3 class="text-sm font-medium text-slate-300 mb-3">Distribución de tokens</h3>
+          <canvas id="chart-tokens" height="200"></canvas>
+        </div>
+        <div class="card p-4">
+          <h3 class="text-sm font-medium text-slate-300 mb-3">Modelos usados</h3>
+          <canvas id="chart-models" height="200"></canvas>
+        </div>
+        <div class="card p-4">
+          <h3 class="text-sm font-medium text-slate-300 mb-3">Costo estimado por proyecto (USD)</h3>
+          <canvas id="chart-cost" height="200"></canvas>
+        </div>
+      </div>
+      <div class="card p-4 mt-4">
+        <h3 class="text-sm font-medium text-slate-300 mb-3">Precios usados para la estimación (USD / 1M tokens)</h3>
+        <div id="pricing-table" class="text-xs"></div>
+      </div>
+    </section>
+
+    <!-- PROYECTOS -->
+    <section id="view-projects" class="view hidden">
+      <div class="card overflow-hidden">
+        <table class="w-full text-sm">
+          <thead class="bg-[#0f1420] text-slate-400 text-xs uppercase tracking-wide">
+            <tr>
+              <th class="text-left px-4 py-3">Proyecto</th>
+              <th class="text-right px-4 py-3">Sesiones</th>
+              <th class="text-right px-4 py-3">Purgadas</th>
+              <th class="text-right px-4 py-3">Prompts</th>
+              <th class="text-right px-4 py-3">Tool calls</th>
+              <th class="text-right px-4 py-3">Tokens</th>
+              <th class="text-right px-4 py-3">Costo (USD)</th>
+              <th class="text-left px-4 py-3">Actividad</th>
+            </tr>
+          </thead>
+          <tbody id="projects-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- LÍNEA DE TIEMPO -->
+    <section id="view-timeline" class="view hidden">
+      <div class="flex items-center gap-2 mb-4">
+        <span class="text-sm text-slate-400">Granularidad:</span>
+        <div class="flex gap-1" id="gran-toggle">
+          <button data-g="day"   class="gran pill px-3 py-1.5 rounded-lg tab-active">Diario</button>
+          <button data-g="week"  class="gran pill px-3 py-1.5 rounded-lg">Semanal</button>
+          <button data-g="month" class="gran pill px-3 py-1.5 rounded-lg">Mensual</button>
+        </div>
+      </div>
+      <div class="card p-4 mb-4">
+        <canvas id="chart-timeline" height="90"></canvas>
+      </div>
+      <div class="card overflow-hidden">
+        <table class="w-full text-sm">
+          <thead class="bg-[#0f1420] text-slate-400 text-xs uppercase tracking-wide">
+            <tr>
+              <th class="text-left px-4 py-3">Período</th>
+              <th class="text-right px-4 py-3">Sesiones</th>
+              <th class="text-right px-4 py-3">Prompts</th>
+              <th class="text-right px-4 py-3">Tool calls</th>
+              <th class="text-right px-4 py-3">Tokens</th>
+              <th class="text-right px-4 py-3">Costo</th>
+              <th class="text-left px-4 py-3">Proyectos</th>
+            </tr>
+          </thead>
+          <tbody id="timeline-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- SESIONES -->
+    <section id="view-sessions" class="view hidden">
+      <div id="active-block" class="mb-5"></div>
+      <div class="flex items-center gap-3 mb-4">
+        <input id="session-search" placeholder="Buscar por título, proyecto o prompt…"
+               class="pill px-3 py-2 rounded-lg w-full max-w-md text-sm outline-none focus:border-blue-500" />
+        <select id="session-project" class="pill px-3 py-2 rounded-lg text-sm outline-none"></select>
+        <label class="text-xs text-slate-400 flex items-center gap-1.5 ml-auto">
+          <input type="checkbox" id="hide-purged" class="accent-blue-500"> ocultar purgadas
+        </label>
+      </div>
+      <div id="sessions-list" class="grid md:grid-cols-2 gap-3"></div>
+    </section>
+
+    <!-- MCP & SERVICIO -->
+    <section id="view-mcp" class="view hidden">
+      <div class="grid lg:grid-cols-2 gap-4">
+        <!-- MCP -->
+        <div class="card p-5">
+          <h3 class="font-semibold mb-1">🔌 Servidor MCP para Claude Code</h3>
+          <p class="text-sm text-slate-400 mb-4">Conecta este historial a Claude Code para preguntarle
+            cosas como <span class="text-slate-200">"¿qué hice el 22 de abril?"</span> y que consulte
+            sesiones por día, semana o mes (incluidas las que iniciaron, terminaron o siguieron ese día).</p>
+
+          <div class="text-xs text-slate-400 mb-1">1. Registra el MCP (una vez, scope usuario):</div>
+          <div class="flex gap-2 mb-4">
+            <code id="mcp-cmd" class="flex-1 pill rounded-lg px-3 py-2 text-xs break-all"></code>
+            <button id="copy-mcp" class="pill px-3 py-2 rounded-lg text-sm hover:bg-[#222c3e] shrink-0">Copiar</button>
+          </div>
+          <div class="text-xs text-slate-400 mb-1">2. Verifica / quita:</div>
+          <div class="text-xs space-y-1 mb-4">
+            <div class="pill rounded px-2 py-1"><span class="text-slate-500">listar:</span> claude mcp list</div>
+            <div class="pill rounded px-2 py-1"><span class="text-slate-500">quitar:</span> claude mcp remove procol-history -s user</div>
+          </div>
+
+          <div class="text-xs text-slate-400 mb-1">Herramientas que expone:</div>
+          <div id="mcp-tools" class="text-xs space-y-1 mb-4"></div>
+          <div class="text-xs text-slate-400 mb-1">Pruébalo preguntándole a Claude Code:</div>
+          <div id="mcp-examples" class="flex flex-wrap gap-1.5"></div>
+        </div>
+
+        <!-- SERVICIO -->
+        <div class="card p-5">
+          <h3 class="font-semibold mb-1">⚙️ Ejecutar siempre en segundo plano</h3>
+          <p class="text-sm text-slate-400 mb-4">Instala el dashboard como servicio (launchd): arranca al
+            iniciar sesión y se mantiene vivo. Así no tienes que correr <code>./run.sh</code> a mano.</p>
+          <div id="service-status" class="mb-4"></div>
+          <div class="flex gap-2 mb-3">
+            <button id="svc-install" class="px-4 py-2 rounded-lg text-sm bg-blue-600 hover:bg-blue-500">Instalar / activar</button>
+            <button id="svc-uninstall" class="pill px-4 py-2 rounded-lg text-sm hover:bg-[#222c3e]">Desinstalar</button>
+            <button id="svc-refresh" class="pill px-3 py-2 rounded-lg text-sm hover:bg-[#222c3e]">↻</button>
+          </div>
+          <div id="service-msg" class="text-xs text-slate-400"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- MODAL DETALLE DE SESIÓN -->
+  <div id="modal" class="fixed inset-0 z-50 hidden">
+    <div class="absolute inset-0 bg-black/60" id="modal-bg"></div>
+    <div class="absolute inset-y-0 right-0 w-full max-w-3xl card rounded-none border-l border-[#1f2735] flex flex-col">
+      <div class="p-4 border-b border-[#1f2735] flex items-start gap-3">
+        <div class="flex-1 min-w-0">
+          <h2 id="m-title" class="font-semibold truncate"></h2>
+          <p id="m-meta" class="text-xs text-slate-400 mt-1"></p>
+        </div>
+        <button id="modal-close" class="pill px-3 py-1.5 rounded-lg text-sm">✕</button>
+      </div>
+      <div class="px-4 pt-3 flex gap-1 text-sm border-b border-[#1f2735]">
+        <button data-mtab="recap" class="mtab px-3 py-2 tab-active rounded-t-lg">Recap</button>
+        <button data-mtab="transcript" class="mtab px-3 py-2 hover:bg-[#1b2333] rounded-t-lg">Transcripción</button>
+        <button data-mtab="stats" class="mtab px-3 py-2 hover:bg-[#1b2333] rounded-t-lg">Métricas</button>
+      </div>
+      <div class="flex-1 overflow-y-auto scroll p-4" id="modal-body"></div>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

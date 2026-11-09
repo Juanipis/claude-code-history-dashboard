@@ -1,0 +1,10 @@
+# Per-user configuration written by `setup.py` (machine-specific — never commit)
+config.json
+
+# SQLite backup + logs (regenerated from ~/.claude on every sync; can get large)
+data/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
